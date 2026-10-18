@@ -54,6 +54,17 @@ input:focus,select:focus{outline:none;border-color:var(--ink)}
 .note{margin-top:48px;color:var(--mute);font-size:13px;border-top:1px solid var(--line);padding-top:16px}
 @media(max-width:520px){.wrap{padding:28px 16px 60px}header{margin-bottom:32px}}
 [hidden]{display:none!important}
+.bar{flex-wrap:wrap}.bar .search{min-width:200px}
+textarea{width:100%;border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;font:inherit;resize:vertical}
+textarea:focus{outline:none;border-color:var(--ink)}
+.hint{font-size:12px;color:var(--mute);margin-top:6px}
+.acc{position:relative;z-index:1;align-self:flex-start;max-width:100%;background:var(--soft);border:0;border-radius:6px;padding:3px 8px;font-size:13px;color:#444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc:hover{background:var(--line)}
+.nt{font-size:13px;color:var(--mute);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.acts{display:flex;gap:2px;position:relative;z-index:1}
+.act{background:none;border:0;color:var(--mute);padding:2px 6px;border-radius:6px}
+.act:hover{background:var(--soft);color:var(--ink)}
+.act[aria-pressed=true]{color:var(--ink)}
 .loginbox{max-width:340px;margin:0 auto}
 .loginbox .btn{width:100%;margin-top:20px}
 .err{color:#b3261e;font-size:13px;margin-top:12px;min-height:1em}
@@ -88,6 +99,7 @@ input:focus,select:focus{outline:none;border-color:var(--ink)}
     <div class="bar">
       <input class="search" id="q" type="search" placeholder="Buscar por título o sitio" aria-label="Buscar">
       <button class="btn" id="add" type="button">Agregar enlace</button>
+      <button class="btn ghost" id="exp" type="button">Exportar</button>
       <button class="btn ghost" id="out" type="button">Salir</button>
     </div>
     <div class="chips" id="chips"></div>
@@ -97,7 +109,7 @@ input:focus,select:focus{outline:none;border-color:var(--ink)}
 </div>
 
 <dialog id="dlg">
-  <h2>Nuevo enlace</h2>
+  <h2 id="dt">Nuevo enlace</h2>
   <label for="url">Dirección</label>
   <input id="url" type="text" inputmode="url" placeholder="https://">
   <label for="ttl">Título (opcional)</label>
@@ -105,6 +117,11 @@ input:focus,select:focus{outline:none;border-color:var(--ink)}
   <label for="cat">Categoría</label>
   <input id="cat" list="cats" type="text" placeholder="Elige una o escribe una nueva">
   <datalist id="cats"></datalist>
+  <label for="acc">Cuenta con la que ingresé (opcional)</label>
+  <input id="acc" type="text" placeholder="Correo o usuario" autocomplete="off">
+  <div class="hint">Anota solo el correo o usuario. No guardes contraseñas aquí.</div>
+  <label for="nts">Notas (opcional)</label>
+  <textarea id="nts" rows="3" placeholder="Plan contratado, para qué lo uso, etc."></textarea>
   <div class="err" id="derr" role="alert"></div>
   <div class="row">
     <button class="btn ghost" id="cancel" type="button">Cancelar</button>
@@ -152,21 +169,29 @@ async function load(){
 
 function render(){
   const cats=[...new Set(links.map(l=>l.category))].sort((a,b)=>a.localeCompare(b,'es'));
-  if(active!=='Todas'&&!cats.includes(active))active='Todas';
-  $('#chips').innerHTML=['Todas',...cats].map(n=>{
-    const c=n==='Todas'?links.length:links.filter(l=>l.category===n).length;
-    return `<button class="chip" aria-pressed="${n===active}" data-c="${esc(n)}">${esc(n)}<small>${c}</small></button>`}).join('');
+  const favs=links.filter(l=>l.favorite).length;
+  if(active==='__fav'&&!favs)active='Todas';
+  if(active!=='Todas'&&active!=='__fav'&&!cats.includes(active))active='Todas';
+  const chip=(k,label,c)=>`<button class="chip" aria-pressed="${k===active}" data-c="${esc(k)}">${esc(label)}<small>${c}</small></button>`;
+  $('#chips').innerHTML=chip('Todas','Todas',links.length)+(favs?chip('__fav','★ Favoritos',favs):'')+cats.map(n=>chip(n,n,links.filter(l=>l.category===n).length)).join('');
   const t=term.toLowerCase();
-  const list=links.filter(l=>(active==='Todas'||l.category===active)&&(!t||(l.title+' '+host(l.url)).toLowerCase().includes(t)));
+  const list=links.filter(l=>(active==='Todas'||(active==='__fav'?l.favorite:l.category===active))&&(!t||[l.title,host(l.url),l.account,l.notes,l.description,l.category].join(' ').toLowerCase().includes(t)));
   $('#grid').innerHTML=list.length?list.map(l=>{
-    const h=hue(host(l.url)),d=new Date(l.created_at).toLocaleDateString('es',{day:'numeric',month:'short'});
+    const h=hue(host(l.url)),d=new Date(l.created_at).toLocaleDateString('es',{day:'numeric',month:'short'}),id=esc(l.id);
     return `<article class="card">
       <div class="thumb" style="background:hsl(${h},40%,96%);color:hsl(${h},45%,40%)">${l.image?`<img src="${esc(l.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:esc(host(l.url)[0].toUpperCase())}</div>
       <div class="body">
         <a href="${esc(safe(l.url))}" target="_blank" rel="noopener">${esc(l.title)}</a>
         <span class="dom">${esc(host(l.url))}</span>
         ${l.description?`<span class="desc">${esc(l.description)}</span>`:''}
-        <div class="meta"><span>${esc(l.category)} · ${d}</span><button class="del" data-id="${esc(l.id)}" aria-label="Eliminar enlace">Eliminar</button></div>
+        ${l.account?`<button class="acc" data-a="copy" data-id="${id}" title="Copiar cuenta">Cuenta: ${esc(l.account)}</button>`:''}
+        ${l.notes?`<span class="nt">${esc(l.notes)}</span>`:''}
+        <div class="meta"><span>${esc(l.category)} · ${d}</span>
+          <span class="acts">
+            <button class="act" data-a="fav" data-id="${id}" aria-label="Favorito" aria-pressed="${!!l.favorite}">${l.favorite?'★':'☆'}</button>
+            <button class="act" data-a="edit" data-id="${id}">Editar</button>
+            <button class="act" data-a="del" data-id="${id}">Eliminar</button>
+          </span></div>
       </div></article>`}).join(''):'<div class="empty">No hay enlaces aquí todavía. Agrega el primero.</div>';
 }
 // si una imagen de vista previa falla, se muestra la inicial del sitio
@@ -176,20 +201,40 @@ document.addEventListener('error',e=>{
 
 $('#chips').onclick=e=>{const b=e.target.closest('.chip');if(b){active=b.dataset.c;render()}};
 $('#q').oninput=e=>{term=e.target.value;render()};
+
 $('#grid').onclick=async e=>{
-  const b=e.target.closest('.del');if(!b||!confirm('¿Eliminar este enlace?'))return;
-  const {error}=await sb.from('links').delete().eq('id',b.dataset.id);
-  if(error){$('#msg').textContent='No se pudo eliminar. Inténtalo de nuevo.';return}
-  links=links.filter(l=>l.id!==b.dataset.id);render();
+  const b=e.target.closest('[data-a]');if(!b)return;
+  const l=links.find(x=>x.id===b.dataset.id);if(!l)return;
+  const a=b.dataset.a;$('#msg').textContent='';
+  if(a==='copy'){
+    try{await navigator.clipboard.writeText(l.account);const o=b.textContent;b.textContent='Copiado';setTimeout(()=>{b.textContent=o},1200)}
+    catch(_){$('#msg').textContent='No se pudo copiar.'}
+  }else if(a==='fav'){
+    const v=!l.favorite;l.favorite=v;render();
+    const {error}=await sb.from('links').update({favorite:v}).eq('id',l.id);
+    if(error){l.favorite=!v;render();$('#msg').textContent='No se pudo actualizar el favorito.'}
+  }else if(a==='edit'){openDlg(l)}
+  else if(a==='del'){
+    if(!confirm('¿Eliminar este enlace?'))return;
+    const {error}=await sb.from('links').delete().eq('id',l.id);
+    if(error){$('#msg').textContent='No se pudo eliminar. Inténtalo de nuevo.';return}
+    links=links.filter(x=>x.id!==l.id);render();
+  }
 };
 
-$('#add').onclick=()=>{
-  $('#url').value='';$('#ttl').value='';$('#derr').textContent='';
-  $('#cat').value=active!=='Todas'?active:'';
-  const cats=[...new Set(['General',...links.map(l=>l.category)])];
+let editing=null;
+function openDlg(l){
+  editing=l||null;
+  $('#dt').textContent=l?'Editar enlace':'Nuevo enlace';
+  $('#url').value=l?l.url:'';$('#ttl').value=l?l.title:'';
+  $('#acc').value=l?(l.account||''):'';$('#nts').value=l?(l.notes||''):'';
+  $('#cat').value=l?l.category:(active!=='Todas'&&active!=='__fav'?active:'');
+  $('#derr').textContent='';
+  const cats=[...new Set(['General',...links.map(x=>x.category)])];
   $('#cats').innerHTML=cats.map(c=>`<option value="${esc(c)}">`).join('');
   $('#dlg').showModal();$('#url').focus();
-};
+}
+$('#add').onclick=()=>openDlg(null);
 $('#cancel').onclick=()=>$('#dlg').close();
 
 async function preview(url){
@@ -208,12 +253,27 @@ $('#save').onclick=async()=>{
   if(!/^https?:\/\//i.test(u))u='https://'+u;
   try{new URL(u)}catch(e){$('#derr').textContent='La dirección no es válida.';return}
   const b=$('#save');b.disabled=true;b.textContent='Guardando…';$('#derr').textContent='';
-  const p=await preview(u);
-  const row={url:u,title:$('#ttl').value.trim()||p.title||host(u),description:p.description||null,image:p.image||null,category:$('#cat').value.trim()||'General'};
-  const {data,error}=await sb.from('links').insert(row).select().single();
+  const row={url:u,category:$('#cat').value.trim()||'General',account:$('#acc').value.trim()||null,notes:$('#nts').value.trim()||null};
+  const urlChanged=!editing||editing.url!==u;
+  let typed=$('#ttl').value.trim();
+  if(editing&&urlChanged&&typed===editing.title)typed='';
+  if(urlChanged){const p=await preview(u);row.title=typed||p.title||host(u);row.description=p.description||null;row.image=p.image||null}
+  else row.title=typed||editing.title;
+  const q=sb.from('links');
+  const res=await (editing?q.update(row).eq('id',editing.id):q.insert(row)).select().single();
   b.disabled=false;b.textContent='Guardar enlace';
-  if(error){$('#derr').textContent='No se pudo guardar. Inténtalo de nuevo.';return}
-  links.unshift(data);$('#dlg').close();render();
+  if(res.error){$('#derr').textContent='No se pudo guardar. Inténtalo de nuevo.';return}
+  if(editing)links=links.map(x=>x.id===editing.id?res.data:x);else links.unshift(res.data);
+  $('#dlg').close();render();
+};
+
+$('#exp').onclick=()=>{
+  const cols=['title','url','category','account','notes','favorite','created_at'];
+  const q=v=>{v=String(v??'');if(/^[=+\-@]/.test(v))v="'"+v;return '"'+v.replace(/"/g,'""')+'"'};
+  const csv='\ufeff'+cols.join(',')+'\n'+links.map(l=>cols.map(c=>q(l[c])).join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download='enlaces-noe.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 };
 </script>
 </body>
